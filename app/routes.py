@@ -124,49 +124,55 @@ def detect_and_classify_food(image):
 @app.route('/image', methods=['GET', 'POST'])
 def image():
     global food_counts
-    
+
     if request.method == "POST":
         try:
-            # Reset counts for new detection
             food_counts = {}
-            
-            # Check if file is in request
-            if 'file' not in request.files:
+
+            # Debug: Print request files and headers
+            print("Request files:", request.files)
+            print("Request headers:", request.headers)
+
+            if 'image' not in request.files:
+                print("Error: No file part in request.files")
                 return jsonify({"error": "No file part"}), 400
-            
-            file = request.files['file']
-            
+
+            file = request.files['image']
+
             if file.filename == '':
+                print("Error: No selected file")
                 return jsonify({"error": "No selected file"}), 400
-            
+
             if file:
-                # Read image directly from memory
                 file_bytes = file.read()
+                print("File size (bytes):", len(file_bytes))
                 nparr = np.frombuffer(file_bytes, np.uint8)
                 image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                
+
                 if image is None:
+                    print("Error: Invalid image file")
                     return jsonify({"error": "Invalid image file"}), 400
-                
-                # Process the image and get detection results
+
                 detection_results = detect_and_classify_food(image)
-                
-                # Prepare response with detection results
+
                 response = {
                     'success': True,
                     'detections': detection_results,
                     'total_detections': len(detection_results),
                     'class_counts': food_counts
                 }
-                
+
                 return jsonify(response)
-            
             else:
+                print("Error: File upload failed")
                 return jsonify({"error": "File upload failed"}), 400
-                
+
         except Exception as e:
+            import traceback
+            print("Exception occurred:", str(e))
+            traceback.print_exc()
             return jsonify({"error": f"Processing failed: {str(e)}"}), 500
-    
+
     elif request.method == "GET":
         return jsonify({"error": "GET method not supported for image processing"}), 405
 
