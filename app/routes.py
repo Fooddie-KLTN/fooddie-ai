@@ -58,7 +58,7 @@ def detect_and_classify_food(image):
     rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     
     # Run YOLOv5 detection using ultralytics
-    results = detection_model(rgb_image)
+    results = detection_model(rgb_image, conf=0.7)
     
     detection_results = []
     
