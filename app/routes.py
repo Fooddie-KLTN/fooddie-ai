@@ -8,10 +8,14 @@ from PIL import Image
 import base64
 import os
 import io
-from tensorflow import keras
-import tensorflow as tf
-from tensorflow.keras.applications.efficientnet import preprocess_input
-from tensorflow.keras.preprocessing import image as keras_image
+# Replace TensorFlow imports with TensorFlow Lite
+try:
+    import tflite_runtime.interpreter as tflite
+    print("Using TensorFlow Lite runtime")
+except ImportError:
+    import tensorflow as tf
+    tflite = tf.lite
+    print("Using TensorFlow Lite from full TensorFlow")
 
 # Load YOLOv5 model using ultralytics package
 try:
@@ -22,18 +26,28 @@ except Exception as e:
     print(f"Error loading model: {e}")
     detection_model = None
 
-# Load Keras model for classification
+# Load TensorFlow Lite model for classification
 try:
-    classifier_model = keras.models.load_model('classifier.keras')
-    print("Classifier loaded successfully")
+    interpreter = tflite.Interpreter(model_path='classifier.tflite')
+    interpreter.allocate_tensors()
+    
+    # Get input and output tensors
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
+    
+    print("TensorFlow Lite classifier loaded successfully")
+    print(f"Input shape: {input_details[0]['shape']}")
+    print(f"Output shape: {output_details[0]['shape']}")
 except Exception as e:
-    print(f"Error loading classifier: {e}")
-    classifier_model = None
+    print(f"Error loading TensorFlow Lite classifier: {e}")
+    interpreter = None
+    input_details = None
+    output_details = None
 
 UPLOAD_FOLDER = os.path.dirname(os.path.abspath(__file__))
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# Food detection counters (adjust these categories based on your classifier)
+# Food detection counters
 food_counts = {}
 
 # Vietnamese food labels
@@ -45,9 +59,21 @@ FOOD_LABELS = [
     'Com tam', 'Goi cuon', 'Hu tieu', 'Mi quang', 'Nem chua', 'Pho', 'Xoi xeo'
 ]
 
+def preprocess_image_for_tflite(image_array):
+    """
+    Preprocess image for TensorFlow Lite EfficientNet model
+    """
+    # Normalize pixel values to [0, 1]
+    image_array = image_array.astype(np.float32) / 255.0
+    
+    # EfficientNet preprocessing (normalize to [-1, 1])
+    image_array = (image_array - 0.5) * 2.0
+    
+    return image_array
+
 def detect_and_classify_food(image):
     """
-    Detect food items using YOLOv5 and classify them using Keras model
+    Detect food items using YOLOv5 and classify them using TensorFlow Lite model
     """
     global food_counts
     
@@ -75,23 +101,23 @@ def detect_and_classify_food(image):
                     # Extract ROI for classification
                     roi = image[int(y1):int(y2), int(x1):int(x2)]
                     
-                    if roi.size > 0 and classifier_model is not None:
-                        # Preprocess ROI for EfficientNet classifier
+                    if roi.size > 0 and interpreter is not None:
+                        # Preprocess ROI for TensorFlow Lite classifier
                         roi_resized = cv2.resize(roi, (224, 224))
                         
                         # Convert BGR to RGB for the classifier
                         roi_rgb = cv2.cvtColor(roi_resized, cv2.COLOR_BGR2RGB)
                         
-                        # Convert to PIL Image format
-                        roi_pil = Image.fromarray(roi_rgb)
-                        
-                        # Convert back to array and preprocess
-                        roi_array = keras_image.img_to_array(roi_pil)
-                        roi_processed = preprocess_input(np.copy(roi_array))  # EfficientNet preprocessing
+                        # Preprocess for TensorFlow Lite
+                        roi_processed = preprocess_image_for_tflite(roi_rgb)
                         roi_batch = np.expand_dims(roi_processed, axis=0)
                         
-                        # Classify the detected food
-                        classification_result = classifier_model.predict(roi_batch, verbose=0)
+                        # Run inference with TensorFlow Lite
+                        interpreter.set_tensor(input_details[0]['index'], roi_batch)
+                        interpreter.invoke()
+                        
+                        # Get output
+                        classification_result = interpreter.get_tensor(output_details[0]['index'])
                         predicted_class_idx = np.argmax(classification_result)
                         classification_confidence = float(np.max(classification_result))
                         
